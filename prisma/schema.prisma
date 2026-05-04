@@ -1,0 +1,231 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts    Account[]
+  sessions    Session[]
+  memberships Membership[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Workspace {
+  id                    String   @id @default(cuid())
+  name                  String
+  userId                String
+  plan                  String   @default("FREE")
+  stripeCustomerId      String?
+  stripeSubscriptionId  String?
+  stripeCurrentPeriodEnd DateTime?
+  companyName           String?
+  monthlySpendEstimate  Int?
+  alertThreshold        Int?     @default(10000)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  memberships          Membership[]
+  statementUploads     StatementUpload[]
+  transactions         Transaction[]
+  vendors              Vendor[]
+  recurringSubscriptions RecurringSubscription[]
+  anomalies            Anomaly[]
+  alertPreference      AlertPreference?
+  emailReceipts        EmailReceipt[]
+  manualSpendEntries   ManualSpendEntry[]
+}
+
+model Membership {
+  id          String @id @default(cuid())
+  userId      String
+  workspaceId String
+  role        String @default("OWNER")
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+}
+
+model StripeCustomer {
+  id               String @id @default(cuid())
+  userId           String @unique
+  stripeCustomerId String @unique
+}
+
+model StatementUpload {
+  id            String   @id @default(cuid())
+  workspaceId   String
+  filename      String
+  status        String   @default("PENDING")
+  columnMapping String?
+  rowCount      Int?
+  createdAt     DateTime @default(now())
+
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+}
+
+model Transaction {
+  id                String   @id @default(cuid())
+  workspaceId       String
+  statementUploadId String?
+  date              DateTime
+  descriptionRaw    String
+  merchantRaw       String
+  amountCents       Int
+  currency          String   @default("USD")
+  last4             String?
+  category          String?
+  normalizedVendorId String?
+  sourceType        String   @default("STATEMENT")
+  createdAt         DateTime @default(now())
+
+  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  statementUpload StatementUpload? @relation(fields: [statementUploadId], references: [id])
+  normalizedVendor Vendor?         @relation(fields: [normalizedVendorId], references: [id])
+  anomalies       Anomaly[]
+}
+
+model Vendor {
+  id             String   @id @default(cuid())
+  workspaceId    String
+  name           String
+  normalizedKey  String
+  vendorType     String   @default("SAAS")
+  website        String?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  workspace              Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  transactions           Transaction[]
+  recurringSubscriptions RecurringSubscription[]
+  anomalies              Anomaly[]
+  emailReceipts          EmailReceipt[]
+
+  @@unique([workspaceId, normalizedKey])
+}
+
+model RecurringSubscription {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  vendorId         String
+  cadence          String    @default("MONTHLY")
+  amountCentsAvg   Int
+  nextExpectedDate DateTime?
+  status           String    @default("ACTIVE")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  vendor    Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, vendorId])
+}
+
+model Anomaly {
+  id            String    @id @default(cuid())
+  workspaceId   String
+  vendorId      String?
+  transactionId String?
+  type          String
+  severity      String    @default("MEDIUM")
+  explanation   String
+  resolvedAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  vendor      Vendor?      @relation(fields: [vendorId], references: [id])
+  transaction Transaction? @relation(fields: [transactionId], references: [id])
+}
+
+model AlertPreference {
+  id                     String   @id @default(cuid())
+  workspaceId            String   @unique
+  emailNewRecurring      Boolean  @default(true)
+  emailSpike             Boolean  @default(true)
+  emailMonthlySummary    Boolean  @default(true)
+  spikeThresholdPct      Int      @default(30)
+  newVendorThresholdCents Int     @default(5000)
+  updatedAt              DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model EmailReceipt {
+  id             String   @id @default(cuid())
+  workspaceId    String
+  gmailMessageId String
+  sender         String
+  subject        String
+  receivedAt     DateTime
+  amountCents    Int?
+  vendorId       String?
+  parsed         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  vendor    Vendor?   @relation(fields: [vendorId], references: [id])
+}
+
+model ManualSpendEntry {
+  id          String   @id @default(cuid())
+  workspaceId String
+  vendorName  String
+  month       String
+  amountCents Int
+  notes       String?
+  source      String   @default("MANUAL")
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
