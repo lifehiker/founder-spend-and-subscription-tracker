@@ -1,22 +1,20 @@
-import NextAuth from "next-auth";
-import Credentials from "next-auth/providers/credentials";
-import { PrismaAdapter } from "@auth/prisma-adapter";
-import { prisma } from "@/lib/db";
-import bcrypt from "bcryptjs";
-import { z } from "zod";
+import NextAuth from "next-auth"
+import Credentials from "next-auth/providers/credentials"
+import { PrismaAdapter } from "@auth/prisma-adapter"
+import { prisma } from "@/lib/db"
+import bcrypt from "bcryptjs"
+import { z } from "zod"
+import { authConfig } from "@/auth.config"
 
 const credentialsSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
-});
+})
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  ...authConfig,
   adapter: PrismaAdapter(prisma),
   session: { strategy: "jwt" },
-  pages: {
-    signIn: "/login",
-    error: "/login",
-  },
   providers: [
     Credentials({
       name: "credentials",
@@ -25,65 +23,50 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        const parsed = credentialsSchema.safeParse(credentials);
-        if (!parsed.success) return null;
+        const parsed = credentialsSchema.safeParse(credentials)
+        if (!parsed.success) return null
 
-        const { email, password } = parsed.data;
+        const { email, password } = parsed.data
 
         const user = await prisma.user.findUnique({
           where: { email: email.toLowerCase() },
-        });
+        })
 
-        if (!user || !user.password) return null;
+        if (!user || !user.password) return null
 
-        const isValid = await bcrypt.compare(password, user.password);
-        if (!isValid) return null;
+        const isValid = await bcrypt.compare(password, user.password)
+        if (!isValid) return null
 
-        // Ensure workspace exists
-        await ensureWorkspace(user.id);
+        await ensureWorkspace(user.id)
 
         return {
           id: user.id,
           email: user.email,
           name: user.name,
           image: user.image,
-        };
+        }
       },
     }),
   ],
-  callbacks: {
-    async jwt({ token, user }) {
-      if (user) {
-        token.id = user.id;
-      }
-      return token;
-    },
-    async session({ session, token }) {
-      if (token.id && session.user) {
-        session.user.id = token.id as string;
-      }
-      return session;
-    },
-  },
-});
+})
 
 async function ensureWorkspace(userId: string) {
   const existing = await prisma.membership.findFirst({
     where: { userId },
-  });
+  })
   if (!existing) {
     const workspace = await prisma.workspace.create({
       data: {
         name: "My Workspace",
         userId,
       },
-    });
+    })
     await prisma.membership.create({
       data: {
         userId,
         workspaceId: workspace.id,
         role: "OWNER",
       },
-    });
+    })
   }
 }
